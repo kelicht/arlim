@@ -58,7 +58,22 @@ class Dataset():
             return (X[self.age_index] == 1)
         else:
             return (X[:, self.age_index] == 1)
-
+        
+        
+    def getDetails(self):
+        features = self.feature_names
+        types = ['Binary' if i else 'Numerical' for i in self.is_binary]
+        mins, means, maxs = self.X.min(axis=0), self.X.mean(axis=0), self.X.max(axis=0)
+        immutables = ['Yes' if i else 'No' for i in self.is_immutable]
+        details = {
+            'Feature': features,
+            'Type': types, 
+            'Min': mins,
+            'Mean': means,
+            'Max': maxs, 
+            'Immutable': immutables, 
+        }
+        return pd.DataFrame(details)
     
 
 class CreditDataset(Dataset):

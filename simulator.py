@@ -27,6 +27,7 @@ class Simulator():
         delay_type=0.2,
         improvement_noise=0.0,
         probability_noise=0.0,
+        model_update=0,
         verbose=False
     ):
         self.estimator = estimator
@@ -38,6 +39,7 @@ class Simulator():
         self.delay_type = delay_type
         self.improvement_noise = improvement_noise
         self.probability_noise = probability_noise
+        self.model_update = model_update
         self.verbose = verbose
 
 
@@ -46,6 +48,7 @@ class Simulator():
 
         X_tr, y_tr = self.dataset.getTrainingSamples()
         self.estimator = self.estimator.fit(X_tr, y_tr)
+        self.X_tr, self.y_tr = X_tr, y_tr
         self.n_features_ = X_tr.shape[1]
 
         counterfactuals, theta = self.dataset.getCounterfactuals(self.estimator)
@@ -117,6 +120,10 @@ class Simulator():
             trust_score = abs(self.verifier_score_[t] - (self.confidence_x_[t] * self.confidence_cf_ + (1-self.confidence_x_[t]) * (1-self.confidence_cf_)))
             is_trustworthy = (trust_score <= self.threshold_)
             is_feasible = is_feasible * is_trustworthy
+        if self.is_update_:
+            is_valid = (self.estimator.predict(self.counterfactuals_) == 1)
+            is_feasible = is_feasible * is_valid
+            self.is_update_ = False
         feasibility = np.where(is_feasible)[0]
 
         cost_dict = {}
@@ -161,6 +168,10 @@ class Simulator():
         self = self.initialize(explainer.fit_verifier)
         explainer = explainer.initialize(self.n_counterfactuals_, self.n_features_, self.n_rounds, self.n_timeout)
         feedbacks = [[] for t in range(self.n_rounds)]
+        if self.model_update > 0:
+            X_obs = [[] for t in range(self.n_rounds)]
+            y_obs = [[] for t in range(self.n_rounds)]
+        self.is_update_ = False
 
         k = np.zeros(self.n_rounds)
         regrets = np.zeros(self.n_rounds)
@@ -216,6 +227,12 @@ class Simulator():
                         feedbacks[t + delay - 1].append((t, reward))
                     else:
                         feedbacks[t + delay - 1].append((k_chosen, probability_dict[explainer.cost_type][k_chosen], reward))
+                
+                if self.model_update > 0 and t + delay < self.n_rounds:
+                    x_cf = self.counterfactuals_[k_chosen]
+                    y_ast = reward
+                    X_obs[t + delay - 1].append(x_cf)
+                    y_obs[t + delay - 1].append(y_ast)
 
             else:
                 expected_reward_best = 0.0
@@ -239,6 +256,15 @@ class Simulator():
             plausibility[t] = plausibility_k
             sparsity[t] = sparsity_k
             times[t] = time() - start_time
+            
+            if self.model_update > 0:
+                if len(X_obs[t]) > 0:
+                    self.X_tr = np.concatenate([self.X_tr, np.array(X_obs[t])], axis=0)
+                    self.y_tr = np.concatenate([self.y_tr, np.array(y_obs[t])], axis=0)
+                if (t+1) % self.model_update == 0:
+                    self.estimator = self.estimator.fit(self.X_tr, self.y_tr)
+                    self.is_update_ = True
+            
             
         cumulative_regrets = np.zeros(self.n_rounds)
         mean_rewards = np.zeros(self.n_rounds)
